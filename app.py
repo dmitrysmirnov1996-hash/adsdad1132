@@ -7,120 +7,183 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Официальная база Sherlock (400+ сайтов, MIT license)
-SHERLOCK_DATA_URL = "https://raw.githubusercontent.com/sherlock-project/sherlock/master/sherlock/resources/data.json"
+HIBP_KEY = os.environ.get("HIBP_KEY", "")
+WMN_DATA_URL = "https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json"
+_wmn_cache = None
 
-# Кэш базы
-_sherlock_cache = None
+# ==================== ПОЛНАЯ БАЗА DEF-КОДОВ РФ ====================
+DEF_DATABASE = {
+    # Tele2
+    "900": ("Tele2", "Все регионы"),
+    "901": ("Скайлинк / МТТ / Сбер-Мобайл", "Все регионы"),
+    "902": ("Tele2", "Все регионы"),
+    "904": ("Tele2 / МТТ", "Все регионы"),
+    "908": ("Tele2 / МегаФон", "Все регионы"),
+    "950": ("Tele2", "Все регионы"),
+    "951": ("Tele2", "Все регионы"),
+    "952": ("Tele2", "Все регионы"),
+    "953": ("Tele2", "Все регионы"),
+    "977": ("Сбер-Мобайл / Tele2", "Все регионы"),
+    "991": ("Ростелеком / Yota", "Все регионы"),
+    "994": ("Сбер-Мобайл / Tele2", "Все регионы"),
+
+    # Билайн
+    "903": ("Билайн", "Все регионы"),
+    "905": ("Билайн", "Все регионы"),
+    "906": ("Билайн", "Все регионы"),
+    "909": ("Билайн", "Все регионы"),
+    "960": ("Билайн", "Все регионы"),
+    "961": ("Билайн", "Все регионы"),
+    "962": ("Билайн", "Все регионы"),
+    "963": ("Билайн", "Все регионы"),
+    "964": ("Билайн", "Все регионы"),
+    "965": ("Билайн", "Все регионы"),
+    "966": ("Билайн / МТТ", "Все регионы"),
+    "967": ("Билайн / МТТ", "Все регионы"),
+    "968": ("Билайн / МТТ", "Все регионы"),
+    "969": ("Билайн / ТВЕ-Телеком", "Все регионы"),
+
+    # МТС
+    "910": ("МТС", "Центральный"),
+    "911": ("МТС", "Северо-Западный"),
+    "912": ("МТС", "Уральский"),
+    "913": ("МТС", "Сибирский"),
+    "914": ("МТС", "Дальневосточный"),
+    "915": ("МТС", "Центральный"),
+    "916": ("МТС", "Москва"),
+    "917": ("МТС", "Поволжский / Москва"),
+    "918": ("МТС", "Южный"),
+    "919": ("МТС", "Все регионы"),
+    "978": ("МТС / Win Mobile", "Крым"),
+    "980": ("МТС / Сбер-Мобайл", "Все регионы"),
+    "982": ("МТС / Экспресс-Мобайл", "Все регионы"),
+    "983": ("МТС", "Сибирский"),
+    "984": ("МТС / ГПБ-Мобайл", "Все регионы"),
+    "985": ("МТС / МТТ", "Москва"),
+    "986": ("МТС / МТТ", "Все регионы"),
+    "987": ("МТС", "Поволжский"),
+    "988": ("МТС", "Южный"),
+    "989": ("МТС / МТТ", "Южный / Москва"),
+
+    # МегаФон
+    "920": ("МегаФон", "Центральный"),
+    "921": ("МегаФон", "Северо-Западный"),
+    "922": ("МегаФон", "Уральский / Поволжский"),
+    "923": ("МегаФон", "Все регионы"),
+    "924": ("МегаФон", "Все регионы"),
+    "925": ("МегаФон", "Москва"),
+    "926": ("МегаФон", "Москва"),
+    "927": ("МегаФон", "Поволжский"),
+    "928": ("МегаФон", "Южный"),
+    "929": ("МегаФон", "Все регионы"),
+    "932": ("МегаФон / МТТ", "Все регионы"),
+    "934": ("МТТ / МегаФон", "Все регионы"),
+    "936": ("МТТ / МегаФон", "Все регионы"),
+    "937": ("МегаФон", "Поволжский"),
+    "938": ("МегаФон / МТТ", "Все регионы"),
+    "939": ("Ростелеком / МегаФон", "Все регионы"),
+    "999": ("МегаФон / Yota", "Все регионы"),
+
+    # Yota
+    "996": ("Yota", "Все регионы"),
+    "997": ("АСВТ / МегаФон", "Москва"),
+    "998": ("Yota", "Все регионы"),
+    "992": ("Yota / Т-Мобайл", "Все регионы"),
+
+    # Виртуальные (MVNO)
+    "930": ("Ростелеком / МТТ", "Все регионы"),
+    "931": ("MCN Telecom", "Все регионы"),
+    "933": ("Т-Мобайл / ВТБ-Мобайл / Альфа-Мобайл", "Все регионы"),
+    "958": ("ТТК / Ростелеком", "Все регионы"),
+    "993": ("Т-Мобайл / Сбер-Мобайл", "Все регионы"),
+    "995": ("Т-Мобайл", "Все регионы"),
+
+    # Региональные
+    "940": ("Мотив", "Екатеринбург"),
+    "941": ("Мотив / ЭРА-ГЛОНАСС", "Екатеринбург"),
+    "942": ("Мотив / ЭРА-ГЛОНАСС", "Екатеринбург"),
+    "943": ("Мотив", "Екатеринбург"),
+    "944": ("Мотив", "Екатеринбург"),
+    "945": ("Мотив", "Екатеринбург"),
+    "946": ("Мотив", "Екатеринбург"),
+    "947": ("Мотив", "Екатеринбург"),
+    "948": ("Мотив", "Екатеринбург"),
+    "949": ("Феникс / Миранда-медиа", "ДНР"),
+    "954": ("ГлобалТел (спутник)", "Россия"),
+    "955": ("TETRA", "Москва"),
+    "956": ("TETRA", "Санкт-Петербург"),
+    "959": ("MVNO", "ЛНР"),
+    "979": ("Миранда-медиа / Win Mobile", "Крым"),
+    "981": ("Экспресс-Мобайл / МТТ", "Все регионы"),
+}
 
 
-def _load_sherlock_data():
-    """Загружает официальную базу Sherlock."""
-    global _sherlock_cache
-    if _sherlock_cache is not None:
-        return _sherlock_cache
-
+def _load_wmn_data():
+    global _wmn_cache
+    if _wmn_cache is not None:
+        return _wmn_cache
     try:
-        req = urllib.request.Request(
-            SHERLOCK_DATA_URL,
-            headers={"User-Agent": "SherlockLike/1.0"}
-        )
+        req = urllib.request.Request(WMN_DATA_URL, headers={"User-Agent": "OSINT/1.0"})
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        _sherlock_cache = data
-        return data
+            _wmn_cache = json.loads(resp.read().decode("utf-8"))
+        return _wmn_cache
     except Exception as e:
-        print(f"[sherlock load error] {e}")
+        print(f"[wmn load error] {e}")
         return {}
 
 
-def _check_site(site_name, site_data, username):
-    """
-    Проверяет один сайт по правилам Sherlock.
-    Sherlock использует:
-    - url: шаблон URL с {username}
-    - urlMain: главная страница
-    - errorType: тип проверки (status_code / message)
-    - errorMsg: сообщение об ошибке (если errorType=message)
-    """
+def _check_site_wmn(site_name, site_data, username):
     try:
-        url_template = site_data.get("url", "")
+        url_template = site_data.get("uri_check", "")
         if not url_template:
             return None
-
-        url = url_template.format(username=username)
-
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            }
-        )
-
+        url = url_template.format(account=username, username=username)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
         try:
             with urllib.request.urlopen(req, timeout=8) as resp:
                 status = resp.getcode()
-                body = resp.read(5000).decode("utf-8", errors="ignore")
+                body = resp.read(3000).decode("utf-8", errors="ignore")
         except urllib.error.HTTPError as e:
             status = e.code
             body = ""
         except Exception:
             return None
-
-        # Проверка по правилам Sherlock
-        error_type = site_data.get("errorType", "status_code")
-
-        if error_type == "status_code":
-            # Если 200 — аккаунт существует
-            if status == 200:
-                # Проверяем errorMsg для дополнительной фильтрации
-                error_msg = site_data.get("errorMsg", "")
-                if error_msg and error_msg in body:
-                    return None
-                return {"site": site_name, "url": url, "status": status}
-
-        elif error_type == "message":
-            # Проверяем, нет ли сообщения об ошибке на странице
+        if status == 200:
             error_msg = site_data.get("errorMsg", "")
-            if status == 200:
-                if error_msg and error_msg in body:
-                    return None
-                return {"site": site_name, "url": url, "status": status}
-
+            if error_msg and error_msg in body:
+                return None
+            return {"site": site_name, "url": url}
         return None
-
     except Exception:
         return None
 
 
 @app.route('/')
 def index():
-    data = _load_sherlock_data()
+    wmn = _load_wmn_data()
     return jsonify({
         "status": "ok",
-        "service": "sherlock-like",
-        "sites_loaded": len(data),
-        "source": "sherlock-project/sherlock (MIT)"
+        "service": "legal-osint",
+        "sites_loaded": len(wmn),
+        "endpoints": ["/check", "/phone", "/leak"]
     })
 
 
 @app.route('/check')
 def check():
-    """Проверяет username по всем сайтам из базы Sherlock."""
     username = request.args.get('username', '').strip()
     if not username:
         return jsonify({"error": "no username"}), 400
-
-    data = _load_sherlock_data()
+    data = _load_wmn_data()
     if not data:
-        return jsonify({"error": "sherlock data not loaded"}), 500
+        return jsonify({"error": "wmn data not loaded"}), 500
 
     found = []
-
-    # Параллельная проверка (30 потоков)
     with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
         futures = {
-            executor.submit(_check_site, name, info, username): name
+            executor.submit(_check_site_wmn, name, info, username): name
             for name, info in data.items()
         }
         for future in concurrent.futures.as_completed(futures):
@@ -128,16 +191,103 @@ def check():
             if result:
                 found.append(result)
 
-    # Сортируем по алфавиту
     found.sort(key=lambda x: x["site"].lower())
+
+    categories = {"Соцсети": [], "Разработка": [], "Игры": [],
+                  "Музыка": [], "Фото": [], "Другое": []}
+    for f in found:
+        name = f["site"].lower()
+        if any(k in name for k in ["git", "code", "dev", "stack", "repl"]):
+            categories["Разработка"].append(f["site"])
+        elif any(k in name for k in ["steam", "game", "roblox", "chess", "xbox", "psn"]):
+            categories["Игры"].append(f["site"])
+        elif any(k in name for k in ["sound", "spotify", "music", "last", "bandcamp"]):
+            categories["Музыка"].append(f["site"])
+        elif any(k in name for k in ["flickr", "photo", "imgur", "deviant", "art"]):
+            categories["Фото"].append(f["site"])
+        elif any(k in name for k in ["t.me", "vk.com", "reddit", "twitter", "instagram", "facebook", "tiktok"]):
+            categories["Соцсети"].append(f["site"])
+        else:
+            categories["Другое"].append(f["site"])
 
     return jsonify({
         "username": username,
         "total": len(found),
         "sites_checked": len(data),
         "found": [f["site"] for f in found],
-        "urls": {f["site"]: f["url"] for f in found}
+        "urls": {f["site"]: f["url"] for f in found},
+        "categories": categories
     })
+
+
+@app.route('/phone')
+def phone():
+    number = request.args.get('number', '').strip()
+    if not number:
+        return jsonify({"error": "no number"}), 400
+
+    clean = "".join(c for c in number if c.isdigit())
+    operator = "неизвестно"
+    region = "неизвестно"
+    country = "неизвестно"
+
+    if clean.startswith("7") and len(clean) >= 4:
+        code = clean[1:4]
+        country = "🇷🇺 Россия/Казахстан"
+        if code in DEF_DATABASE:
+            operator, region = DEF_DATABASE[code]
+        else:
+            operator, region = "неизвестный оператор", "Россия"
+    elif clean.startswith("380"):
+        country = "🇺🇦 Украина"
+        operator, region = "Киевстар/Vodafone/Лайфселл", "Украина"
+    elif clean.startswith("375"):
+        country = "🇧🇾 Беларусь"
+        operator, region = "А1/МТС/Беларусь", "Беларусь"
+    elif clean.startswith("1"):
+        country = "🇺🇸 США/Канада"
+        operator, region = "разные операторы", "Северная Америка"
+    elif clean.startswith("44"):
+        country = "🇬🇧 Великобритания"
+        operator, region = "разные операторы", "Европа"
+    elif clean.startswith("49"):
+        country = "🇩🇪 Германия"
+        operator, region = "разные операторы", "Европа"
+
+    return jsonify({
+        "number": number,
+        "valid": True,
+        "country": country,
+        "operator": operator,
+        "region": region,
+        "def_code": clean[1:4] if clean.startswith("7") else None
+    })
+
+
+@app.route('/leak')
+def leak():
+    email = request.args.get('email', '').strip()
+    if not email:
+        return jsonify({"error": "no email"}), 400
+    if not HIBP_KEY:
+        return jsonify({"error": "HIBP_KEY not set"}), 500
+
+    url = f"https://haveibeenpwned.com/api/v3/breachedaccount/{urllib.parse.quote(email)}"
+    headers = {"User-Agent": "OSINT/1.0", "hibp-api-key": HIBP_KEY}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return jsonify({
+                "email": email, "total": len(data),
+                "breaches": [b.get("Name") for b in data]
+            })
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return jsonify({"email": email, "total": 0, "breaches": []})
+        return jsonify({"error": f"HIBP error {e.code}"}), e.code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':
