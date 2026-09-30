@@ -13,10 +13,10 @@ def check():
         return jsonify({"error": "no username"}), 400
 
     try:
-        # Запускаем maigret как python-модуль
+        # Ограничиваем: только 300 самых популярных сайтов, таймаут 15 сек на сайт
         result = subprocess.run(
-            ["maigret", username, "-a", "--json", "ndjson"],
-            capture_output=True, text=True, timeout=600
+            ["maigret", username, "--top-sites", "300", "--timeout", "15", "--json", "ndjson"],
+            capture_output=True, text=True, timeout=90
         )
 
         found = []
@@ -33,17 +33,17 @@ def check():
             "username": username,
             "total": len(found),
             "found": found,
-            "stderr": result.stderr[-500:] if result.stderr else ""
+            "stderr": result.stderr[-300:] if result.stderr else ""
         })
     except subprocess.TimeoutExpired:
-        return jsonify({"error": "timeout"}), 504
+        return jsonify({"error": "timeout", "message": "Maigret не успел за 90 секунд. Попробуй другого юзера."}), 504
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/')
 def index():
-    return jsonify({"status": "ok", "service": "maigret-checker"})
+    return jsonify({"status": "ok", "service": "maigret-checker", "mode": "top-300-sites"})
 
 
 if __name__ == '__main__':
