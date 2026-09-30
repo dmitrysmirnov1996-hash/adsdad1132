@@ -1,9 +1,6 @@
 FROM python:3.11-slim
 
-# Устанавливаем системные зависимости для сборки
-# gcc — компилятор C
-# python3-dev — заголовочные файлы Python
-# libfreetype6-dev, libjpeg-dev, libffi-dev — для reportlab (PDF)
+# Устанавливаем системные зависимости, включая gcc и python3-dev
 RUN apt-get update && apt-get install -y \
     gcc \
     python3-dev \
@@ -11,6 +8,10 @@ RUN apt-get update && apt-get install -y \
     libjpeg-dev \
     libffi-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Хак для Python 3.11: создаём симлинк на longintrepr.h
+# Это решает проблему "longintrepr.h: No such file or directory"
+RUN ln -s /usr/local/include/python3.11/cpython/longintrepr.h /usr/local/include/python3.11/longintrepr.h || true
 
 WORKDIR /app
 
