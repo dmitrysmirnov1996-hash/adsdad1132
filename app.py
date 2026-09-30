@@ -8,7 +8,12 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 HIBP_KEY = os.environ.get("HIBP_KEY", "")
+
+# ==================== АКТУАЛЬНЫЕ ИСТОЧНИКИ ДАННЫХ ====================
+SHERLOCK_DATA_URL = "https://raw.githubusercontent.com/sherlock-project/sherlock/refs/heads/master/sherlock_project/resources/data.json"
 WMN_DATA_URL = "https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json"
+
+_sherlock_cache = None
 _wmn_cache = None
 
 # ==================== ПОЛНАЯ БАЗА DEF-КОДОВ РФ ====================
@@ -26,7 +31,6 @@ DEF_DATABASE = {
     "977": ("Сбер-Мобайл / Tele2", "Все регионы"),
     "991": ("Ростелеком / Yota", "Все регионы"),
     "994": ("Сбер-Мобайл / Tele2", "Все регионы"),
-
     # Билайн
     "903": ("Билайн", "Все регионы"),
     "905": ("Билайн", "Все регионы"),
@@ -42,7 +46,6 @@ DEF_DATABASE = {
     "967": ("Билайн / МТТ", "Все регионы"),
     "968": ("Билайн / МТТ", "Все регионы"),
     "969": ("Билайн / ТВЕ-Телеком", "Все регионы"),
-
     # МТС
     "910": ("МТС", "Центральный"),
     "911": ("МТС", "Северо-Западный"),
@@ -64,7 +67,6 @@ DEF_DATABASE = {
     "987": ("МТС", "Поволжский"),
     "988": ("МТС", "Южный"),
     "989": ("МТС / МТТ", "Южный / Москва"),
-
     # МегаФон
     "920": ("МегаФон", "Центральный"),
     "921": ("МегаФон", "Северо-Западный"),
@@ -83,13 +85,11 @@ DEF_DATABASE = {
     "938": ("МегаФон / МТТ", "Все регионы"),
     "939": ("Ростелеком / МегаФон", "Все регионы"),
     "999": ("МегаФон / Yota", "Все регионы"),
-
     # Yota
     "996": ("Yota", "Все регионы"),
     "997": ("АСВТ / МегаФон", "Москва"),
     "998": ("Yota", "Все регионы"),
     "992": ("Yota / Т-Мобайл", "Все регионы"),
-
     # Виртуальные (MVNO)
     "930": ("Ростелеком / МТТ", "Все регионы"),
     "931": ("MCN Telecom", "Все регионы"),
@@ -97,7 +97,6 @@ DEF_DATABASE = {
     "958": ("ТТК / Ростелеком", "Все регионы"),
     "993": ("Т-Мобайл / Сбер-Мобайл", "Все регионы"),
     "995": ("Т-Мобайл", "Все регионы"),
-
     # Региональные
     "940": ("Мотив", "Екатеринбург"),
     "941": ("Мотив / ЭРА-ГЛОНАСС", "Екатеринбург"),
@@ -118,6 +117,20 @@ DEF_DATABASE = {
 }
 
 
+def _load_sherlock_data():
+    global _sherlock_cache
+    if _sherlock_cache is not None:
+        return _sherlock_cache
+    try:
+        req = urllib.request.Request(SHERLOCK_DATA_URL, headers={"User-Agent": "OSINT/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            _sherlock_cache = json.loads(resp.read().decode("utf-8"))
+        return _sherlock_cache
+    except Exception as e:
+        print(f"[sherlock load error] {e}")
+        return {}
+
+
 def _load_wmn_data():
     global _wmn_cache
     if _wmn_cache is not None:
@@ -132,7 +145,46 @@ def _load_wmn_data():
         return {}
 
 
+def _check_site_sherlock(site_name, site_data, username):
+    """Проверка по базе Sherlock."""
+    try:
+        url_template = site_data.get("url", "")
+        if not url_template:
+            return None
+        url = url_template.format(username)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                status = resp.getcode()
+                body = resp.read(3000).decode("utf-8", errors="ignore")
+        except urllib.error.HTTPError as e:
+            status = e.code
+            body = ""
+        except Exception:
+            return None
+
+        error_type = site_data.get("errorType", "status_code")
+        if error_type == "status_code":
+            if status == 200:
+                error_msg = site_data.get("errorMsg", "")
+                if error_msg and error_msg in body:
+                    return None
+                return {"site": site_name, "url": url}
+        elif error_type == "message":
+            error_msg = site_data.get("errorMsg", "")
+            if status == 200:
+                if error_msg and error_msg in body:
+                    return None
+                return {"site": site_name, "url": url}
+        return None
+    except Exception:
+        return None
+
+
 def _check_site_wmn(site_name, site_data, username):
+    """Проверка по базе WhatsMyName."""
     try:
         url_template = site_data.get("uri_check", "")
         if not url_template:
@@ -162,11 +214,15 @@ def _check_site_wmn(site_name, site_data, username):
 
 @app.route('/')
 def index():
+    sherlock = _load_sherlock_data()
     wmn = _load_wmn_data()
     return jsonify({
         "status": "ok",
         "service": "legal-osint",
-        "sites_loaded": len(wmn),
+        "sherlock_sites": len(sherlock),
+        "wmn_sites": len(wmn),
+        "sherlock_source": SHERLOCK_DATA_URL,
+        "wmn_source": WMN_DATA_URL,
         "endpoints": ["/check", "/phone", "/leak"]
     })
 
@@ -176,26 +232,49 @@ def check():
     username = request.args.get('username', '').strip()
     if not username:
         return jsonify({"error": "no username"}), 400
-    data = _load_wmn_data()
-    if not data:
-        return jsonify({"error": "wmn data not loaded"}), 500
 
+    source = request.args.get('source', 'both').lower()
     found = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
-        futures = {
-            executor.submit(_check_site_wmn, name, info, username): name
-            for name, info in data.items()
-        }
-        for future in concurrent.futures.as_completed(futures):
-            result = future.result()
-            if result:
-                found.append(result)
+    sites_checked = 0
 
-    found.sort(key=lambda x: x["site"].lower())
+    if source in ("sherlock", "both"):
+        data = _load_sherlock_data()
+        if data:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+                futures = {executor.submit(_check_site_sherlock, name, info, username): name
+                           for name, info in data.items()}
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        found.append(result)
+            sites_checked += len(data)
+
+    if source in ("wmn", "both"):
+        data = _load_wmn_data()
+        if data:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=30) as executor:
+                futures = {executor.submit(_check_site_wmn, name, info, username): name
+                           for name, info in data.items()}
+                for future in concurrent.futures.as_completed(futures):
+                    result = future.result()
+                    if result:
+                        found.append(result)
+            sites_checked += len(data)
+
+    # Дедупликация по имени сайта
+    seen = set()
+    unique = []
+    for f in found:
+        key = f["site"].lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(f)
+
+    unique.sort(key=lambda x: x["site"].lower())
 
     categories = {"Соцсети": [], "Разработка": [], "Игры": [],
                   "Музыка": [], "Фото": [], "Другое": []}
-    for f in found:
+    for f in unique:
         name = f["site"].lower()
         if any(k in name for k in ["git", "code", "dev", "stack", "repl"]):
             categories["Разработка"].append(f["site"])
@@ -212,10 +291,10 @@ def check():
 
     return jsonify({
         "username": username,
-        "total": len(found),
-        "sites_checked": len(data),
-        "found": [f["site"] for f in found],
-        "urls": {f["site"]: f["url"] for f in found},
+        "total": len(unique),
+        "sites_checked": sites_checked,
+        "found": [f["site"] for f in unique],
+        "urls": {f["site"]: f["url"] for f in unique},
         "categories": categories
     })
 
