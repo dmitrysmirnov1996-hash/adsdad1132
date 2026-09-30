@@ -16,6 +16,10 @@ RUN ln -s /usr/local/include/python3.11/cpython/longintrepr.h /usr/local/include
 WORKDIR /app
 
 COPY requirements.txt .
+ENV YARL_NO_EXTENSIONS=1
+ENV MULTIDICT_NO_EXTENSIONS=1
+ENV AIOHTTP_NO_EXTENSIONS=1
+ENV FROZENLIST_NO_EXTENSIONS=1
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Ставим Maigret как Python-пакет
