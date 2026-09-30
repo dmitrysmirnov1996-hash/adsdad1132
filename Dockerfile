@@ -1,7 +1,12 @@
 FROM python:3.11-slim
 
-# Устанавливаем системные зависимости, которых не хватает для сборки reportlab
+# Устанавливаем системные зависимости для сборки
+# gcc — компилятор C
+# python3-dev — заголовочные файлы Python
+# libfreetype6-dev, libjpeg-dev, libffi-dev — для reportlab (PDF)
 RUN apt-get update && apt-get install -y \
+    gcc \
+    python3-dev \
     libfreetype6-dev \
     libjpeg-dev \
     libffi-dev \
